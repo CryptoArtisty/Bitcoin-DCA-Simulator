@@ -136,7 +136,7 @@ body {
 }
 
 .btn-danger:hover {
-  background-color: #b22a00;
+  background-color: #c62828;
 }
 
 #chartContainer {
@@ -203,6 +203,15 @@ body {
   color: #2e7d32;
 }
 
+#countdown {
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 5px;
+  margin-top: 10px;
+  text-align: center;
+  font-weight: 600;
+}
+
 #log {
   max-height: 300px;
   overflow-y: auto;
@@ -244,20 +253,6 @@ body {
   margin-left: 10px;
 }
 
-.countdown-timer {
-  margin-top: 15px;
-  padding: 10px;
-  background-color: #f5f5f5;
-  border-radius: 5px;
-  text-align: center;
-  font-weight: 500;
-}
-
-.countdown-timer span {
-  font-weight: 600;
-  color: var(--primary-color);
-}
-
 @media (max-width: 768px) {
   .status-grid {
     grid-template-columns: 1fr 1fr;
@@ -288,7 +283,7 @@ body {
 <div class="container">
   <div class="header">
     <h1>Bitcoin DCA Accumulator (Advanced)</h1>
-    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals and trading fees</p>
+    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals and offline support</p>
   </div>
 
   <div class="card">
@@ -311,10 +306,11 @@ body {
             <option value="months">Months</option>
           </select>
         </div>
+        <div id="countdown">Next purchase in: --:--:--</div>
       </div>
       <div class="input-group">
         <label for="tradingFees">Trading Fees (%)</label>
-        <input type="number" id="tradingFees" value="0.1" min="0" step="0.01">
+        <input type="number" id="tradingFees" value="0.1" min="0" step="0.01" max="10">
       </div>
       <div class="input-group">
         <label for="dropThreshold">Price Drop Alert Threshold (%)</label>
@@ -344,9 +340,6 @@ body {
       <button id="stop" class="btn btn-secondary" disabled>Stop Simulation</button>
       <button id="reset" class="btn btn-danger">Reset Data</button>
     </div>
-    <div id="countdown" class="countdown-timer">
-      Next purchase in: <span id="countdownTimer">-</span>
-    </div>
   </div>
 
   <div class="card">
@@ -373,7 +366,7 @@ body {
         <p id="currentValue">$0</p>
       </div>
       <div class="status-card">
-        <h3>Profit/Loss (After Fees)</h3>
+        <h3>Profit/Loss</h3>
         <p id="profitLoss">$0</p>
       </div>
     </div>
@@ -409,8 +402,8 @@ let currentPrice = 0;
 let simulationActive = false;
 let lastSyncTime = 0;
 let backgroundSyncInterval;
-let nextPurchaseTime = 0;
-let countdownInterval;
+let nextPurchaseTime = null;
+let countdownInterval = null;
 let tradingFees = 0.1; // Default 0.1%
 
 let priceData = {
@@ -438,26 +431,24 @@ let priceData = {
   ]
 };
 
-// Service Worker Registration
-async function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      console.log('ServiceWorker registration successful');
-      return registration;
-    } catch (err) {
-      console.error('ServiceWorker registration failed:', err);
-    }
+// Countdown timer
+function updateCountdown() {
+  if (!nextPurchaseTime) return;
+  
+  const now = new Date();
+  const diff = nextPurchaseTime - now;
+  
+  if (diff <= 0) {
+    document.getElementById('countdown').textContent = 'Next purchase: Now!';
+    return;
   }
-}
-
-// Background Sync
-function setupBackgroundSync() {
-  if ('serviceWorker' in navigator && 'SyncManager' in window) {
-    navigator.serviceWorker.ready.then(registration => {
-      registration.sync.register('price-update');
-    });
-  }
+  
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  
+  document.getElementById('countdown').textContent = 
+    `Next purchase in: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 // IndexedDB functions
@@ -487,11 +478,8 @@ async function loadState() {
     priceData = state.priceData || { labels: [], datasets: [] };
     currentPrice = state.currentPrice || 0;
     lastSyncTime = state.lastSyncTime || 0;
-    nextPurchaseTime = state.nextPurchaseTime || 0;
+    nextPurchaseTime = state.nextPurchaseTime ? new Date(state.nextPurchaseTime) : null;
     tradingFees = state.tradingFees || 0.1;
-    
-    // Update trading fees input
-    document.getElementById('tradingFees').value = tradingFees;
     
     // Update UI
     updateUIFromState();
@@ -506,6 +494,7 @@ async function loadState() {
 function updateUIFromState() {
   document.getElementById('totalBtc').textContent = totalBtc.toFixed(8);
   document.getElementById('totalInvested').textContent = `$${totalInvested.toFixed(2)}`;
+  document.getElementById('tradingFees').value = tradingFees;
   
   const avgPrice = totalBtc > 0 ? (totalInvested / totalBtc) : 0;
   document.getElementById('avgPrice').textContent = `$${avgPrice.toFixed(2)}`;
@@ -523,7 +512,7 @@ function updateUIFromState() {
       <div class="log-time">${new Date(buy.timestamp).toLocaleString()}</div>
       <div class="log-details">
         Bought ${buy.btcBought.toFixed(8)} BTC at $${buy.price.toFixed(2)} ($${buy.amount.toFixed(2)})
-        ${buy.fees > 0 ? `<br><small>Fees: $${(buy.amount * buy.fees / 100).toFixed(2)} (${buy.fees}%)</small>` : ''}
+        ${buy.fees > 0 ? `<br><small>Fees: $${buy.fees.toFixed(2)} (${(buy.fees / buy.amount * 100).toFixed(2)}%)</small>` : ''}
       </div>
       <div class="log-profit ${pl.isProfit ? 'profit' : 'loss'}">
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
@@ -536,44 +525,11 @@ function updateUIFromState() {
   });
   
   // Add event listeners to delete buttons
-  document.querySelectorAll('.delete-entry').forEach(btn => {
-    btn.addEventListener('click', function() {
+  document.querySelectorAll('.delete-entry').forEach(button => {
+    button.addEventListener('click', function() {
       deleteEntry(parseInt(this.getAttribute('data-index')));
     });
   });
-}
-
-// Countdown timer functions
-function updateCountdown() {
-  if (!nextPurchaseTime) return;
-  
-  const now = Date.now();
-  const diff = nextPurchaseTime - now;
-  
-  if (diff <= 0) {
-    document.getElementById('countdownTimer').textContent = 'Processing...';
-    return;
-  }
-  
-  const seconds = Math.floor(diff / 1000) % 60;
-  const minutes = Math.floor(diff / (1000 * 60)) % 60;
-  const hours = Math.floor(diff / (1000 * 60 * 60)) % 24;
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  
-  let countdownStr = '';
-  if (days > 0) countdownStr += `${days}d `;
-  if (hours > 0 || days > 0) countdownStr += `${hours}h `;
-  if (minutes > 0 || hours > 0 || days > 0) countdownStr += `${minutes}m `;
-  countdownStr += `${seconds}s`;
-  
-  document.getElementById('countdownTimer').textContent = countdownStr;
-}
-
-function startCountdown(intervalMs) {
-  clearInterval(countdownInterval);
-  nextPurchaseTime = Date.now() + intervalMs;
-  updateCountdown();
-  countdownInterval = setInterval(updateCountdown, 1000);
 }
 
 // Price functions
@@ -597,11 +553,10 @@ async function getCurrentPrice() {
 }
 
 function calculateProfitLoss(buyPrice, currentPrice, amount, fees = 0) {
-  const feeAmount = amount * (fees / 100);
-  const effectiveAmount = amount - feeAmount;
+  const effectiveAmount = amount - fees;
   const btcAmount = effectiveAmount / buyPrice;
   const currentValue = btcAmount * currentPrice;
-  const profitLoss = currentValue - amount; // Compare to original amount
+  const profitLoss = currentValue - amount; // Compare to original amount (including fees)
   const percentage = (profitLoss / amount) * 100;
   
   return {
@@ -736,11 +691,6 @@ function initChart() {
           title: {
             display: true,
             text: 'Price (USD)'
-          },
-          ticks: {
-            callback: function(value) {
-              return '$' + value.toLocaleString();
-            }
           }
         }
       },
@@ -757,7 +707,7 @@ function initChart() {
                 label += ': ';
               }
               if (context.parsed.y !== null) {
-                label += '$' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                label += '$' + context.parsed.y.toFixed(2);
               }
               return label;
             }
@@ -778,6 +728,8 @@ function initChart() {
 let intervalId;
 function startSimulation() {
   if (intervalId) clearInterval(intervalId);
+  if (countdownInterval) clearInterval(countdownInterval);
+  
   const amount = parseFloat(document.getElementById('amount').value);
   const intervalValue = parseFloat(document.getElementById('intervalValue').value);
   const intervalUnit = document.getElementById('intervalUnit').value;
@@ -795,22 +747,25 @@ function startSimulation() {
   
   const intervalMs = convertToMilliseconds(intervalValue, intervalUnit);
   
+  // Calculate next purchase time
+  nextPurchaseTime = new Date(Date.now() + intervalMs);
+  
+  // Start countdown
+  countdownInterval = setInterval(updateCountdown, 1000);
+  updateCountdown();
+  
   // Initial purchase
   executePurchase(amount);
   
   // Set up interval for future purchases
-  intervalId = setInterval(() => executePurchase(amount), intervalMs);
-  
-  // Start countdown timer
-  startCountdown(intervalMs);
+  intervalId = setInterval(() => {
+    executePurchase(amount);
+    nextPurchaseTime = new Date(Date.now() + intervalMs);
+  }, intervalMs);
   
   document.getElementById('start').disabled = true;
   document.getElementById('stop').disabled = false;
   simulationActive = true;
-  
-  // Setup background sync
-  setupBackgroundSync();
-  backgroundSyncInterval = setInterval(setupBackgroundSync, SYNC_INTERVAL);
   
   saveState();
 }
@@ -818,11 +773,9 @@ function startSimulation() {
 async function executePurchase(amount) {
   const price = await getCurrentPrice();
   if (price) {
-    const fees = tradingFees;
-    const feeAmount = amount * (fees / 100);
-    const effectiveAmount = amount - feeAmount;
+    const fees = amount * (tradingFees / 100);
+    const effectiveAmount = amount - fees;
     const btcBought = effectiveAmount / price;
-    
     totalBtc += btcBought;
     totalInvested += amount;
     const avgPrice = totalInvested / totalBtc;
@@ -852,7 +805,7 @@ async function executePurchase(amount) {
       <div class="log-time">${new Date().toLocaleString()}</div>
       <div class="log-details">
         Bought ${btcBought.toFixed(8)} BTC at $${price.toFixed(2)} ($${amount.toFixed(2)})
-        ${fees > 0 ? `<br><small>Fees: $${feeAmount.toFixed(2)} (${fees}%)</small>` : ''}
+        ${fees > 0 ? `<br><small>Fees: $${fees.toFixed(2)} (${(fees / amount * 100).toFixed(2)}%)</small>` : ''}
       </div>
       <div class="log-profit ${pl.isProfit ? 'profit' : 'loss'}">
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
@@ -873,16 +826,28 @@ async function executePurchase(amount) {
     }
     updateStatus();
     await saveState();
-    
-    // Reset countdown for next purchase
-    const intervalValue = parseFloat(document.getElementById('intervalValue').value);
-    const intervalUnit = document.getElementById('intervalUnit').value;
-    const intervalMs = convertToMilliseconds(intervalValue, intervalUnit);
-    startCountdown(intervalMs);
   }
 }
 
-function deleteEntry(index) {
+function stopSimulation() {
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+  }
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+  document.getElementById('start').disabled = false;
+  document.getElementById('stop').disabled = true;
+  simulationActive = false;
+  nextPurchaseTime = null;
+  document.getElementById('countdown').textContent = 'Next purchase in: --:--:--';
+  
+  saveState();
+}
+
+async function deleteEntry(index) {
   if (index >= 0 && index < buyHistory.length) {
     const entry = buyHistory[index];
     totalBtc -= entry.btcBought;
@@ -891,8 +856,11 @@ function deleteEntry(index) {
     // Remove from buy history
     buyHistory.splice(index, 1);
     
-    // Remove from chart
-    priceData.datasets[1].data = priceData.datasets[1].data.filter((_, i) => i !== index);
+    // Rebuild price chart buy markers
+    priceData.datasets[1].data = buyHistory.map(buy => ({
+      x: new Date(buy.timestamp).toISOString(),
+      y: buy.price
+    }));
     
     // Update UI
     updateUIFromState();
@@ -901,21 +869,7 @@ function deleteEntry(index) {
       chart.update();
     }
     
-    saveState();
-  }
-}
-
-function stopSimulation() {
-  if (intervalId) {
-    clearInterval(intervalId);
-    intervalId = null;
-    clearInterval(countdownInterval);
-    document.getElementById('start').disabled = false;
-    document.getElementById('stop').disabled = true;
-    simulationActive = false;
-    
-    clearInterval(backgroundSyncInterval);
-    saveState();
+    await saveState();
   }
 }
 
@@ -940,7 +894,7 @@ async function resetData() {
     document.getElementById('profitLoss').textContent = '$0';
     document.getElementById('log').innerHTML = '';
     document.getElementById('alerts').innerHTML = '';
-    document.getElementById('countdownTimer').textContent = '-';
+    document.getElementById('countdown').textContent = 'Next purchase in: --:--:--';
     
     if (chart) {
       chart.update();
@@ -948,14 +902,7 @@ async function resetData() {
     
     await idbKeyval.del(STORAGE_KEY);
     
-    if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
-      clearInterval(countdownInterval);
-      document.getElementById('start').disabled = false;
-      document.getElementById('stop').disabled = true;
-      simulationActive = false;
-    }
+    stopSimulation();
   }
 }
 
@@ -963,26 +910,13 @@ async function resetData() {
 document.getElementById('start').addEventListener('click', startSimulation);
 document.getElementById('stop').addEventListener('click', stopSimulation);
 document.getElementById('reset').addEventListener('click', resetData);
-
-// Trading fees change handler
 document.getElementById('tradingFees').addEventListener('change', function() {
   tradingFees = parseFloat(this.value) || 0;
   updateUIFromState();
-  saveState();
 });
 
 // Initialize the application
 window.addEventListener('DOMContentLoaded', async () => {
-  // Register Service Worker
-  if ('serviceWorker' in navigator) {
-    try {
-      await navigator.serviceWorker.register('sw.js');
-      console.log('Service Worker registered');
-    } catch (error) {
-      console.error('Service Worker registration failed:', error);
-    }
-  }
-  
   // Load saved state
   await loadState();
   
@@ -992,17 +926,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     updatePrice(); // Get initial price
   });
 });
-
-// Background Sync handler
-if ('serviceWorker' in navigator && 'SyncManager' in window) {
-  navigator.serviceWorker.ready.then(registration => {
-    registration.sync.register('price-update').then(() => {
-      console.log('Background sync registered');
-    }).catch(err => {
-      console.error('Background sync registration failed:', err);
-    });
-  });
-}
 
 // Periodic state save
 setInterval(saveState, 30000); // Save every 30 seconds
