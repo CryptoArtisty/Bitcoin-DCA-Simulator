@@ -130,6 +130,15 @@ body {
   background-color: #494949;
 }
 
+.btn-danger {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+.btn-danger:hover {
+  background-color: #b22a00;
+}
+
 #chartContainer {
   width: 100%;
   height: 400px;
@@ -231,6 +240,24 @@ body {
   text-align: right;
 }
 
+.log-actions {
+  margin-left: 10px;
+}
+
+.countdown-timer {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #f5f5f5;
+  border-radius: 5px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.countdown-timer span {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
 @media (max-width: 768px) {
   .status-grid {
     grid-template-columns: 1fr 1fr;
@@ -243,6 +270,17 @@ body {
   .input-grid {
     grid-template-columns: 1fr;
   }
+  
+  .log-entry {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .log-actions {
+    margin-left: 0;
+    margin-top: 5px;
+    align-self: flex-end;
+  }
 }
 </style>
 </head>
@@ -250,7 +288,7 @@ body {
 <div class="container">
   <div class="header">
     <h1>Bitcoin DCA Accumulator (Advanced)</h1>
-    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals and offline support</p>
+    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals and trading fees</p>
   </div>
 
   <div class="card">
@@ -273,6 +311,10 @@ body {
             <option value="months">Months</option>
           </select>
         </div>
+      </div>
+      <div class="input-group">
+        <label for="tradingFees">Trading Fees (%)</label>
+        <input type="number" id="tradingFees" value="0.1" min="0" step="0.01">
       </div>
       <div class="input-group">
         <label for="dropThreshold">Price Drop Alert Threshold (%)</label>
@@ -300,7 +342,10 @@ body {
     <div class="button-group">
       <button id="start" class="btn btn-primary">Start Simulation</button>
       <button id="stop" class="btn btn-secondary" disabled>Stop Simulation</button>
-      <button id="reset" class="btn btn-secondary">Reset Data</button>
+      <button id="reset" class="btn btn-danger">Reset Data</button>
+    </div>
+    <div id="countdown" class="countdown-timer">
+      Next purchase in: <span id="countdownTimer">-</span>
     </div>
   </div>
 
@@ -328,7 +373,7 @@ body {
         <p id="currentValue">$0</p>
       </div>
       <div class="status-card">
-        <h3>Profit/Loss</h3>
+        <h3>Profit/Loss (After Fees)</h3>
         <p id="profitLoss">$0</p>
       </div>
     </div>
@@ -364,6 +409,9 @@ let currentPrice = 0;
 let simulationActive = false;
 let lastSyncTime = 0;
 let backgroundSyncInterval;
+let nextPurchaseTime = 0;
+let countdownInterval;
+let tradingFees = 0.1; // Default 0.1%
 
 let priceData = {
   labels: [],
@@ -422,7 +470,9 @@ async function saveState() {
     priceData,
     currentPrice,
     simulationActive,
-    lastSyncTime: Date.now()
+    lastSyncTime: Date.now(),
+    nextPurchaseTime,
+    tradingFees
   };
   await idbKeyval.set(STORAGE_KEY, state);
 }
@@ -437,6 +487,11 @@ async function loadState() {
     priceData = state.priceData || { labels: [], datasets: [] };
     currentPrice = state.currentPrice || 0;
     lastSyncTime = state.lastSyncTime || 0;
+    nextPurchaseTime = state.nextPurchaseTime || 0;
+    tradingFees = state.tradingFees || 0.1;
+    
+    // Update trading fees input
+    document.getElementById('tradingFees').value = tradingFees;
     
     // Update UI
     updateUIFromState();
@@ -460,21 +515,65 @@ function updateUIFromState() {
   // Rebuild log
   const logElement = document.getElementById('log');
   logElement.innerHTML = '';
-  buyHistory.forEach(buy => {
-    const pl = calculateProfitLoss(buy.price, currentPrice, buy.amount);
+  buyHistory.forEach((buy, index) => {
+    const pl = calculateProfitLoss(buy.price, currentPrice, buy.amount, buy.fees);
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
     logEntry.innerHTML = `
       <div class="log-time">${new Date(buy.timestamp).toLocaleString()}</div>
       <div class="log-details">
         Bought ${buy.btcBought.toFixed(8)} BTC at $${buy.price.toFixed(2)} ($${buy.amount.toFixed(2)})
+        ${buy.fees > 0 ? `<br><small>Fees: $${(buy.amount * buy.fees / 100).toFixed(2)} (${buy.fees}%)</small>` : ''}
       </div>
       <div class="log-profit ${pl.isProfit ? 'profit' : 'loss'}">
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
       </div>
+      <div class="log-actions">
+        <button class="btn btn-danger btn-sm delete-entry" data-index="${index}">Delete</button>
+      </div>
     `;
     logElement.appendChild(logEntry);
   });
+  
+  // Add event listeners to delete buttons
+  document.querySelectorAll('.delete-entry').forEach(btn => {
+    btn.addEventListener('click', function() {
+      deleteEntry(parseInt(this.getAttribute('data-index')));
+    });
+  });
+}
+
+// Countdown timer functions
+function updateCountdown() {
+  if (!nextPurchaseTime) return;
+  
+  const now = Date.now();
+  const diff = nextPurchaseTime - now;
+  
+  if (diff <= 0) {
+    document.getElementById('countdownTimer').textContent = 'Processing...';
+    return;
+  }
+  
+  const seconds = Math.floor(diff / 1000) % 60;
+  const minutes = Math.floor(diff / (1000 * 60)) % 60;
+  const hours = Math.floor(diff / (1000 * 60 * 60)) % 24;
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  
+  let countdownStr = '';
+  if (days > 0) countdownStr += `${days}d `;
+  if (hours > 0 || days > 0) countdownStr += `${hours}h `;
+  if (minutes > 0 || hours > 0 || days > 0) countdownStr += `${minutes}m `;
+  countdownStr += `${seconds}s`;
+  
+  document.getElementById('countdownTimer').textContent = countdownStr;
+}
+
+function startCountdown(intervalMs) {
+  clearInterval(countdownInterval);
+  nextPurchaseTime = Date.now() + intervalMs;
+  updateCountdown();
+  countdownInterval = setInterval(updateCountdown, 1000);
 }
 
 // Price functions
@@ -497,10 +596,12 @@ async function getCurrentPrice() {
   }
 }
 
-function calculateProfitLoss(buyPrice, currentPrice, amount) {
-  const btcAmount = amount / buyPrice;
+function calculateProfitLoss(buyPrice, currentPrice, amount, fees = 0) {
+  const feeAmount = amount * (fees / 100);
+  const effectiveAmount = amount - feeAmount;
+  const btcAmount = effectiveAmount / buyPrice;
   const currentValue = btcAmount * currentPrice;
-  const profitLoss = currentValue - amount;
+  const profitLoss = currentValue - amount; // Compare to original amount
   const percentage = (profitLoss / amount) * 100;
   
   return {
@@ -635,6 +736,11 @@ function initChart() {
           title: {
             display: true,
             text: 'Price (USD)'
+          },
+          ticks: {
+            callback: function(value) {
+              return '$' + value.toLocaleString();
+            }
           }
         }
       },
@@ -651,7 +757,7 @@ function initChart() {
                 label += ': ';
               }
               if (context.parsed.y !== null) {
-                label += '$' + context.parsed.y.toFixed(2);
+                label += '$' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
               }
               return label;
             }
@@ -675,6 +781,7 @@ function startSimulation() {
   const amount = parseFloat(document.getElementById('amount').value);
   const intervalValue = parseFloat(document.getElementById('intervalValue').value);
   const intervalUnit = document.getElementById('intervalUnit').value;
+  tradingFees = parseFloat(document.getElementById('tradingFees').value) || 0;
   
   if (isNaN(amount) || amount <= 0) {
     alert('Please enter a valid investment amount');
@@ -694,6 +801,9 @@ function startSimulation() {
   // Set up interval for future purchases
   intervalId = setInterval(() => executePurchase(amount), intervalMs);
   
+  // Start countdown timer
+  startCountdown(intervalMs);
+  
   document.getElementById('start').disabled = true;
   document.getElementById('stop').disabled = false;
   simulationActive = true;
@@ -708,7 +818,11 @@ function startSimulation() {
 async function executePurchase(amount) {
   const price = await getCurrentPrice();
   if (price) {
-    const btcBought = amount / price;
+    const fees = tradingFees;
+    const feeAmount = amount * (fees / 100);
+    const effectiveAmount = amount - feeAmount;
+    const btcBought = effectiveAmount / price;
+    
     totalBtc += btcBought;
     totalInvested += amount;
     const avgPrice = totalInvested / totalBtc;
@@ -717,7 +831,8 @@ async function executePurchase(amount) {
       timestamp: new Date(), 
       price, 
       btcBought, 
-      amount 
+      amount,
+      fees
     };
     buyHistory.push(buyRecord);
     
@@ -729,7 +844,7 @@ async function executePurchase(amount) {
     priceData.datasets[1].data.push({x: nowStr, y: price});
     
     // Calculate profit/loss for this purchase
-    const pl = calculateProfitLoss(price, currentPrice, amount);
+    const pl = calculateProfitLoss(price, currentPrice, amount, fees);
     
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
@@ -737,18 +852,56 @@ async function executePurchase(amount) {
       <div class="log-time">${new Date().toLocaleString()}</div>
       <div class="log-details">
         Bought ${btcBought.toFixed(8)} BTC at $${price.toFixed(2)} ($${amount.toFixed(2)})
+        ${fees > 0 ? `<br><small>Fees: $${feeAmount.toFixed(2)} (${fees}%)</small>` : ''}
       </div>
       <div class="log-profit ${pl.isProfit ? 'profit' : 'loss'}">
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
       </div>
+      <div class="log-actions">
+        <button class="btn btn-danger btn-sm delete-entry" data-index="${buyHistory.length - 1}">Delete</button>
+      </div>
     `;
     document.getElementById('log').insertBefore(logEntry, document.getElementById('log').firstChild);
+    
+    // Add event listener to delete button
+    logEntry.querySelector('.delete-entry').addEventListener('click', function() {
+      deleteEntry(parseInt(this.getAttribute('data-index')));
+    });
     
     if (chart) {
       chart.update();
     }
     updateStatus();
     await saveState();
+    
+    // Reset countdown for next purchase
+    const intervalValue = parseFloat(document.getElementById('intervalValue').value);
+    const intervalUnit = document.getElementById('intervalUnit').value;
+    const intervalMs = convertToMilliseconds(intervalValue, intervalUnit);
+    startCountdown(intervalMs);
+  }
+}
+
+function deleteEntry(index) {
+  if (index >= 0 && index < buyHistory.length) {
+    const entry = buyHistory[index];
+    totalBtc -= entry.btcBought;
+    totalInvested -= entry.amount;
+    
+    // Remove from buy history
+    buyHistory.splice(index, 1);
+    
+    // Remove from chart
+    priceData.datasets[1].data = priceData.datasets[1].data.filter((_, i) => i !== index);
+    
+    // Update UI
+    updateUIFromState();
+    
+    if (chart) {
+      chart.update();
+    }
+    
+    saveState();
   }
 }
 
@@ -756,6 +909,7 @@ function stopSimulation() {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
+    clearInterval(countdownInterval);
     document.getElementById('start').disabled = false;
     document.getElementById('stop').disabled = true;
     simulationActive = false;
@@ -786,6 +940,7 @@ async function resetData() {
     document.getElementById('profitLoss').textContent = '$0';
     document.getElementById('log').innerHTML = '';
     document.getElementById('alerts').innerHTML = '';
+    document.getElementById('countdownTimer').textContent = '-';
     
     if (chart) {
       chart.update();
@@ -796,6 +951,7 @@ async function resetData() {
     if (intervalId) {
       clearInterval(intervalId);
       intervalId = null;
+      clearInterval(countdownInterval);
       document.getElementById('start').disabled = false;
       document.getElementById('stop').disabled = true;
       simulationActive = false;
@@ -807,6 +963,13 @@ async function resetData() {
 document.getElementById('start').addEventListener('click', startSimulation);
 document.getElementById('stop').addEventListener('click', stopSimulation);
 document.getElementById('reset').addEventListener('click', resetData);
+
+// Trading fees change handler
+document.getElementById('tradingFees').addEventListener('change', function() {
+  tradingFees = parseFloat(this.value) || 0;
+  updateUIFromState();
+  saveState();
+});
 
 // Initialize the application
 window.addEventListener('DOMContentLoaded', async () => {
