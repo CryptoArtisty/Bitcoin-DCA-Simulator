@@ -390,7 +390,6 @@ body {
 <script>
 // Constants
 const STORAGE_KEY = 'bitcoinDCAAdvanced';
-const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes for background sync
 
 // State variables
 let totalBtc = 0;
@@ -400,8 +399,6 @@ let priceHistory = [];
 let chart;
 let currentPrice = 0;
 let simulationActive = false;
-let lastSyncTime = 0;
-let backgroundSyncInterval;
 let nextPurchaseTime = null;
 let countdownInterval = null;
 let tradingFees = 0.1; // Default 0.1%
@@ -412,40 +409,53 @@ let priceData = {
     { 
       label: 'BTC Price', 
       data: [], 
-      borderColor: 'rgba(41, 98, 255, 0.8)',
-      backgroundColor: 'rgba(41, 98, 255, 0.1)',
+      borderColor: 'rgb(75, 192, 192)',
       tension: 0.1,
       borderWidth: 2,
-      fill: true 
+      fill: false 
     },
     { 
       label: 'Buys', 
       data: [], 
       type: 'scatter', 
-      backgroundColor: 'rgba(0, 200, 83, 0.7)',
-      borderColor: 'rgba(0, 200, 83, 1)',
-      pointRadius: 6,
-      pointHoverRadius: 8,
-      pointBorderWidth: 2
+      backgroundColor: 'red',
+      pointRadius: 5,
+      pointHoverRadius: 7
     }
   ]
 };
 
-// Countdown timer
-function updateCountdown() {
-  if (!nextPurchaseTime) return;
+// Countdown timer that triggers purchases
+function startCountdown(intervalMs) {
+  if (countdownInterval) clearInterval(countdownInterval);
   
-  const now = new Date();
-  const diff = nextPurchaseTime - now;
+  nextPurchaseTime = new Date(Date.now() + intervalMs);
   
-  if (diff <= 0) {
-    document.getElementById('countdown').textContent = 'Next purchase: Now!';
-    return;
-  }
+  countdownInterval = setInterval(() => {
+    const now = new Date();
+    const diff = nextPurchaseTime - now;
+    
+    if (diff <= 0) {
+      // Time to execute purchase
+      const amount = parseFloat(document.getElementById('amount').value);
+      executePurchase(amount);
+      
+      // Reset countdown for next interval
+      nextPurchaseTime = new Date(now.getTime() + intervalMs);
+      updateCountdownDisplay(intervalMs);
+    } else {
+      updateCountdownDisplay(diff);
+    }
+  }, 1000);
   
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  // Initial display
+  updateCountdownDisplay(intervalMs);
+}
+
+function updateCountdownDisplay(timeMs) {
+  const hours = Math.floor(timeMs / (1000 * 60 * 60));
+  const minutes = Math.floor((timeMs % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((timeMs % (1000 * 60)) / 1000);
   
   document.getElementById('countdown').textContent = 
     `Next purchase in: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
@@ -461,7 +471,6 @@ async function saveState() {
     priceData,
     currentPrice,
     simulationActive,
-    lastSyncTime: Date.now(),
     nextPurchaseTime,
     tradingFees
   };
@@ -477,7 +486,6 @@ async function loadState() {
     priceHistory = state.priceHistory || [];
     priceData = state.priceData || { labels: [], datasets: [] };
     currentPrice = state.currentPrice || 0;
-    lastSyncTime = state.lastSyncTime || 0;
     nextPurchaseTime = state.nextPurchaseTime ? new Date(state.nextPurchaseTime) : null;
     tradingFees = state.tradingFees || 0.1;
     
@@ -747,21 +755,11 @@ function startSimulation() {
   
   const intervalMs = convertToMilliseconds(intervalValue, intervalUnit);
   
-  // Calculate next purchase time
-  nextPurchaseTime = new Date(Date.now() + intervalMs);
-  
-  // Start countdown
-  countdownInterval = setInterval(updateCountdown, 1000);
-  updateCountdown();
+  // Start countdown timer that will trigger purchases
+  startCountdown(intervalMs);
   
   // Initial purchase
   executePurchase(amount);
-  
-  // Set up interval for future purchases
-  intervalId = setInterval(() => {
-    executePurchase(amount);
-    nextPurchaseTime = new Date(Date.now() + intervalMs);
-  }, intervalMs);
   
   document.getElementById('start').disabled = true;
   document.getElementById('stop').disabled = false;
@@ -841,7 +839,6 @@ function stopSimulation() {
   document.getElementById('start').disabled = false;
   document.getElementById('stop').disabled = true;
   simulationActive = false;
-  nextPurchaseTime = null;
   document.getElementById('countdown').textContent = 'Next purchase in: --:--:--';
   
   saveState();
