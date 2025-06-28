@@ -4,6 +4,7 @@
 <title>Bitcoin DCA Accumulator</title>
 <script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/idb-keyval.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="manifest" href="manifest.json">
 <style>
 :root {
   --primary-color: #2962ff;
@@ -547,8 +548,6 @@ function updateCountdownDisplay(timeMs) {
 }
 
 // Data persistence functions
-// In your main application code, replace the saveState function with this improved version:
-
 async function saveState() {
   const state = {
     totalBtc,
@@ -561,33 +560,30 @@ async function saveState() {
   };
 
   try {
-    // Save to IndexedDB first
+    // Try IndexedDB first
     await idbKeyval.set(IDB_STORE_NAME, state);
     
-    // Then save to localStorage as fallback
+    // Fallback to localStorage
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (localStorageError) {
-      console.error('Error saving to localStorage:', localStorageError);
+      console.warn('LocalStorage save failed:', localStorageError);
     }
     
-    // Only show success if IndexedDB save worked
     showToast('Data saved successfully', 'success', 2000);
   } catch (idbError) {
-    console.error('Error saving to IndexedDB:', idbError);
+    console.error('IndexedDB save failed:', idbError);
     
     // Fallback to localStorage only
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      showToast('Data saved to localStorage', 'info', 2000);
+      showToast('Data saved (localStorage only)', 'info', 2000);
     } catch (localStorageError) {
-      console.error('Error saving to localStorage:', localStorageError);
+      console.error('Both storage methods failed:', localStorageError);
       showToast('Failed to save data', 'error', 2000);
     }
   }
 }
-
-// And update the loadState function:
 
 async function loadState() {
   let loadedState = null;
@@ -596,42 +592,35 @@ async function loadState() {
   try {
     loadedState = await idbKeyval.get(IDB_STORE_NAME);
     if (loadedState) {
-      showToast('Data loaded from IndexedDB', 'info', 2000);
+      console.log('Loaded from IndexedDB');
     }
   } catch (idbError) {
-    console.error('Error loading from IndexedDB:', idbError);
+    console.error('IndexedDB load failed:', idbError);
   }
   
-  // If IndexedDB failed or empty, try localStorage
+  // Fallback to localStorage
   if (!loadedState) {
     try {
       const savedData = localStorage.getItem(STORAGE_KEY);
       if (savedData) {
         loadedState = JSON.parse(savedData);
-        showToast('Data loaded from localStorage', 'info', 2000);
+        console.log('Loaded from localStorage');
         
-        // Try to save back to IndexedDB for future use
+        // Try to save back to IndexedDB
         try {
           await idbKeyval.set(IDB_STORE_NAME, loadedState);
         } catch (e) {
-          console.error('Failed to migrate to IndexedDB:', e);
+          console.warn('Failed to migrate to IndexedDB:', e);
         }
       }
     } catch (localStorageError) {
-      console.error('Error loading from localStorage:', localStorageError);
+      console.error('LocalStorage load failed:', localStorageError);
     }
   }
   
   if (loadedState) {
     applyLoadedState(loadedState);
-  }
-}
-  
-  // Fall back to localStorage if IndexedDB fails
-  const savedData = localStorage.getItem(STORAGE_KEY);
-  if (savedData) {
-    applyLoadedState(JSON.parse(savedData));
-    showToast('Data loaded from localStorage', 'info', 2000);
+    showToast('Data loaded successfully', 'success', 2000);
   }
 }
 
