@@ -1,15 +1,11 @@
-// sw.js - Service Worker for Bitcoin DCA Accumulator
-
-const CACHE_NAME = 'bitcoin-dca-cache-v1';
+// Service Worker for Bitcoin DCA Accumulator
+const CACHE_NAME = 'bitcoin-dca-cache-v2';
 const OFFLINE_URL = 'offline.html';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
-  '/styles.css',
-  '/app.js',
   'https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/idb-keyval.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600&display=swap'
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
 ];
 
 // Install event - cache static assets
@@ -18,9 +14,9 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         return cache.addAll(PRECACHE_URLS)
-          .then(() => cache.add(OFFLINE_URL));
+          .then(() => cache.add(OFFLINE_URL))
+          .then(() => self.skipWaiting());
       })
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -104,26 +100,4 @@ self.addEventListener('sync', event => {
         })
     );
   }
-});
-
-// Push notification event (optional)
-self.addEventListener('push', event => {
-  const data = event.data.json();
-  const options = {
-    body: data.body,
-    icon: 'icons/icon-192x192.png',
-    badge: 'icons/badge-72x72.png'
-  };
-
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
-  );
-});
-
-// Notification click event (optional)
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  event.waitUntil(
-    clients.openWindow(event.notification.data.url || '/')
-  );
 });
