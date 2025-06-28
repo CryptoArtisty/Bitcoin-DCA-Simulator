@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Offline | Bitcoin DCA Accumulator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f5f7fa;
+  color: #263238;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  text-align: center;
+}
+
+.offline-container {
+  max-width: 500px;
+  padding: 30px;
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  color: #2962ff;
+  margin-bottom: 20px;
+}
+
+p {
+  margin-bottom: 30px;
+  line-height: 1.6;
+}
+
+.icon {
+  font-size: 3rem;
+  color: #757575;
+  margin-bottom: 20px;
+}
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background-color: #2962ff;
+  color: white;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:hover {
+  background-color: #0039cb;
+}
+</style>
+</head>
+<body>
+<div class="offline-container">
+  <div class="icon">
+    <i class="fas fa-wifi-slash"></i>
+  </div>
+  <h1>You're Offline</h1>
+  <p>The Bitcoin DCA Accumulator requires an internet connection to fetch the latest price data and perform transactions. Please check your network connection and try again.</p>
+  <p>Your existing data is still available, but new purchases won't be processed until you're back online.</p>
+  <a href="/" class="btn">Retry Connection</a>
+</div>
+</body>
+</html>
