@@ -258,6 +258,68 @@ body {
   color: #c62828;
 }
 
+/* Toast notifications */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+.toast {
+  padding: 15px 20px;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  color: white;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease-out;
+  max-width: 350px;
+}
+
+.toast-success {
+  background-color: var(--secondary-color);
+}
+
+.toast-info {
+  background-color: var(--primary-color);
+}
+
+.toast-warning {
+  background-color: var(--warning-color);
+}
+
+.toast-error {
+  background-color: var(--danger-color);
+}
+
+.toast i {
+  margin-right: 10px;
+  font-size: 1.2rem;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .status-grid {
     grid-template-columns: 1fr 1fr;
@@ -280,6 +342,17 @@ body {
     margin-left: 0;
     margin-top: 5px;
     align-self: flex-end;
+  }
+  
+  .toast-container {
+    bottom: 10px;
+    right: 10px;
+    left: 10px;
+  }
+  
+  .toast {
+    max-width: 100%;
+    width: calc(100% - 20px);
   }
 }
 </style>
@@ -385,6 +458,9 @@ body {
   </div>
 </div>
 
+<!-- Toast notifications container -->
+<div class="toast-container" id="toastContainer"></div>
+
 <script>
 // Constants
 const STORAGE_KEY = 'bitcoinDCAAdvancedData';
@@ -400,6 +476,39 @@ let simulationActive = false;
 let nextPurchaseTime = null;
 let countdownInterval = null;
 let tradingFees = 0.1; // Default 0.1%
+
+// Toast notification function
+function showToast(message, type = 'info', duration = 3000) {
+  const toastContainer = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  
+  let icon;
+  switch(type) {
+    case 'success':
+      icon = '<i class="fas fa-check-circle"></i>';
+      break;
+    case 'error':
+      icon = '<i class="fas fa-exclamation-circle"></i>';
+      break;
+    case 'warning':
+      icon = '<i class="fas fa-exclamation-triangle"></i>';
+      break;
+    default:
+      icon = '<i class="fas fa-info-circle"></i>';
+  }
+  
+  toast.innerHTML = `${icon}${message}`;
+  toastContainer.appendChild(toast);
+  
+  // Auto-remove after duration
+  setTimeout(() => {
+    toast.style.animation = 'fadeOut 0.3s ease-out';
+    setTimeout(() => {
+      toast.remove();
+    }, 300);
+  }, duration);
+}
 
 // Countdown timer that triggers purchases
 function startCountdown(intervalMs) {
@@ -454,8 +563,10 @@ async function saveState() {
   // Also save to IndexedDB
   try {
     await idbKeyval.set(IDB_STORE_NAME, state);
+    showToast('Data saved successfully', 'success', 2000);
   } catch (e) {
     console.error('Error saving to IndexedDB:', e);
+    showToast('Error saving data', 'error', 2000);
   }
 }
 
@@ -465,6 +576,7 @@ async function loadState() {
     const idbState = await idbKeyval.get(IDB_STORE_NAME);
     if (idbState) {
       applyLoadedState(idbState);
+      showToast('Data loaded from IndexedDB', 'info', 2000);
       return;
     }
   } catch (e) {
@@ -475,6 +587,7 @@ async function loadState() {
   const savedData = localStorage.getItem(STORAGE_KEY);
   if (savedData) {
     applyLoadedState(JSON.parse(savedData));
+    showToast('Data loaded from localStorage', 'info', 2000);
   }
 }
 
@@ -553,6 +666,7 @@ async function getCurrentPrice() {
       return currentPrice;
     } catch (e) {
       console.error('Failed to fetch price from both APIs');
+      showToast('Failed to fetch price data', 'error', 3000);
       return null;
     }
   }
@@ -624,12 +738,14 @@ async function updatePrice() {
           <div class="alert alert-warning">
             Price dropped by ${-change.toFixed(2)}% in the last ${alertDurationValue} ${alertDurationUnit}. Good time to buy extra!
           </div>`;
+        showToast(`Price dropped ${-change.toFixed(2)}%!`, 'warning', 5000);
       }
       if (change > soarThreshold) {
         alertHtml += `
           <div class="alert alert-success">
             Price soared by ${change.toFixed(2)}% in the last ${alertDurationValue} ${alertDurationUnit}. Consider taking profits!
           </div>`;
+        showToast(`Price soared ${change.toFixed(2)}%!`, 'success', 5000);
       }
       document.getElementById('alerts').innerHTML = alertHtml;
     }
@@ -650,12 +766,12 @@ function startSimulation() {
   tradingFees = parseFloat(document.getElementById('tradingFees').value) || 0;
   
   if (isNaN(amount) || amount <= 0) {
-    alert('Please enter a valid investment amount');
+    showToast('Please enter a valid investment amount', 'error', 3000);
     return;
   }
   
   if (isNaN(intervalValue) || intervalValue <= 0) {
-    alert('Please enter a valid interval');
+    showToast('Please enter a valid interval', 'error', 3000);
     return;
   }
   
@@ -671,6 +787,7 @@ function startSimulation() {
   document.getElementById('stop').disabled = false;
   simulationActive = true;
   
+  showToast('Simulation started successfully', 'success', 2000);
   saveState();
 }
 
@@ -724,6 +841,13 @@ async function executePurchase(amount) {
       deleteEntry(parseInt(this.getAttribute('data-index')));
     });
     
+    // Show purchase toast
+    showToast(
+      `Purchased ${btcBought.toFixed(8)} BTC at $${price.toFixed(2)}`, 
+      'success', 
+      3000
+    );
+    
     updateStatus();
     await saveState();
   }
@@ -739,6 +863,7 @@ function stopSimulation() {
   simulationActive = false;
   document.getElementById('countdown').textContent = 'Next purchase in: --:--:--';
   
+  showToast('Simulation stopped', 'info', 2000);
   saveState();
 }
 
@@ -754,6 +879,7 @@ async function deleteEntry(index) {
     // Update UI
     updateUIFromState();
     
+    showToast('Transaction deleted', 'info', 2000);
     await saveState();
   }
 }
@@ -783,6 +909,7 @@ async function resetData() {
       console.error('Error clearing IndexedDB:', e);
     }
     
+    showToast('All data has been reset', 'info', 3000);
     stopSimulation();
   }
 }
@@ -803,6 +930,19 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // Get initial price
   updatePrice();
+  
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(registration => {
+        console.log('ServiceWorker registration successful');
+        showToast('App is ready for offline use', 'success', 3000);
+      })
+      .catch(err => {
+        console.error('ServiceWorker registration failed:', err);
+        showToast('Offline features not available', 'warning', 3000);
+      });
+  }
 });
 
 // Periodic state save
