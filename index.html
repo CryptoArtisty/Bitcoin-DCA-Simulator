@@ -547,8 +547,9 @@ function updateCountdownDisplay(timeMs) {
 }
 
 // Data persistence functions
+// In your main application code, replace the saveState function with this improved version:
+
 async function saveState() {
-  // Save to localStorage
   const state = {
     totalBtc,
     totalInvested,
@@ -558,30 +559,73 @@ async function saveState() {
     nextPurchaseTime: nextPurchaseTime ? nextPurchaseTime.getTime() : null,
     tradingFees
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  
-  // Also save to IndexedDB
+
   try {
+    // Save to IndexedDB first
     await idbKeyval.set(IDB_STORE_NAME, state);
+    
+    // Then save to localStorage as fallback
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (localStorageError) {
+      console.error('Error saving to localStorage:', localStorageError);
+    }
+    
+    // Only show success if IndexedDB save worked
     showToast('Data saved successfully', 'success', 2000);
-  } catch (e) {
-    console.error('Error saving to IndexedDB:', e);
-    showToast('Error saving data', 'error', 2000);
+  } catch (idbError) {
+    console.error('Error saving to IndexedDB:', idbError);
+    
+    // Fallback to localStorage only
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      showToast('Data saved to localStorage', 'info', 2000);
+    } catch (localStorageError) {
+      console.error('Error saving to localStorage:', localStorageError);
+      showToast('Failed to save data', 'error', 2000);
+    }
   }
 }
 
+// And update the loadState function:
+
 async function loadState() {
-  // Try to load from IndexedDB first
+  let loadedState = null;
+  
+  // Try IndexedDB first
   try {
-    const idbState = await idbKeyval.get(IDB_STORE_NAME);
-    if (idbState) {
-      applyLoadedState(idbState);
+    loadedState = await idbKeyval.get(IDB_STORE_NAME);
+    if (loadedState) {
       showToast('Data loaded from IndexedDB', 'info', 2000);
-      return;
     }
-  } catch (e) {
-    console.error('Error loading from IndexedDB:', e);
+  } catch (idbError) {
+    console.error('Error loading from IndexedDB:', idbError);
   }
+  
+  // If IndexedDB failed or empty, try localStorage
+  if (!loadedState) {
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
+        loadedState = JSON.parse(savedData);
+        showToast('Data loaded from localStorage', 'info', 2000);
+        
+        // Try to save back to IndexedDB for future use
+        try {
+          await idbKeyval.set(IDB_STORE_NAME, loadedState);
+        } catch (e) {
+          console.error('Failed to migrate to IndexedDB:', e);
+        }
+      }
+    } catch (localStorageError) {
+      console.error('Error loading from localStorage:', localStorageError);
+    }
+  }
+  
+  if (loadedState) {
+    applyLoadedState(loadedState);
+  }
+}
   
   // Fall back to localStorage if IndexedDB fails
   const savedData = localStorage.getItem(STORAGE_KEY);
