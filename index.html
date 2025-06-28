@@ -1,11 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Bitcoin DCA Accumulator (Advanced)</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0"></script>
+<title>Bitcoin DCA Accumulator</title>
 <script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/idb-keyval.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
 :root {
   --primary-color: #2962ff;
@@ -139,12 +137,6 @@ body {
   background-color: #c62828;
 }
 
-#chartContainer {
-  width: 100%;
-  height: 400px;
-  margin-top: 20px;
-}
-
 .status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -253,6 +245,19 @@ body {
   margin-left: 10px;
 }
 
+.delete-btn {
+  background: none;
+  border: none;
+  color: var(--danger-color);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 5px;
+}
+
+.delete-btn:hover {
+  color: #c62828;
+}
+
 @media (max-width: 768px) {
   .status-grid {
     grid-template-columns: 1fr 1fr;
@@ -282,8 +287,8 @@ body {
 <body>
 <div class="container">
   <div class="header">
-    <h1>Bitcoin DCA Accumulator (Advanced)</h1>
-    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals and offline support</p>
+    <h1>Bitcoin DCA Accumulator</h1>
+    <p>Advanced simulation of Dollar Cost Averaging (DCA) for Bitcoin with flexible intervals</p>
   </div>
 
   <div class="card">
@@ -372,13 +377,6 @@ body {
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-title">Price Chart</div>
-    <div id="chartContainer">
-      <canvas id="priceChart"></canvas>
-    </div>
-  </div>
-
   <div id="alerts"></div>
 
   <div class="card">
@@ -389,41 +387,19 @@ body {
 
 <script>
 // Constants
-const STORAGE_KEY = 'bitcoinDCAAdvanced';
+const STORAGE_KEY = 'bitcoinDCAAdvancedData';
+const IDB_STORE_NAME = 'bitcoinDCAAdvanced';
 
 // State variables
 let totalBtc = 0;
 let totalInvested = 0;
 let buyHistory = [];
 let priceHistory = [];
-let chart;
 let currentPrice = 0;
 let simulationActive = false;
 let nextPurchaseTime = null;
 let countdownInterval = null;
 let tradingFees = 0.1; // Default 0.1%
-
-let priceData = {
-  labels: [],
-  datasets: [
-    { 
-      label: 'BTC Price', 
-      data: [], 
-      borderColor: 'rgb(75, 192, 192)',
-      tension: 0.1,
-      borderWidth: 2,
-      fill: false 
-    },
-    { 
-      label: 'Buys', 
-      data: [], 
-      type: 'scatter', 
-      backgroundColor: 'red',
-      pointRadius: 5,
-      pointHoverRadius: 7
-    }
-  ]
-};
 
 // Countdown timer that triggers purchases
 function startCountdown(intervalMs) {
@@ -461,41 +437,61 @@ function updateCountdownDisplay(timeMs) {
     `Next purchase in: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-// IndexedDB functions
+// Data persistence functions
 async function saveState() {
+  // Save to localStorage
   const state = {
     totalBtc,
     totalInvested,
     buyHistory,
-    priceHistory,
-    priceData,
     currentPrice,
     simulationActive,
-    nextPurchaseTime,
+    nextPurchaseTime: nextPurchaseTime ? nextPurchaseTime.getTime() : null,
     tradingFees
   };
-  await idbKeyval.set(STORAGE_KEY, state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  
+  // Also save to IndexedDB
+  try {
+    await idbKeyval.set(IDB_STORE_NAME, state);
+  } catch (e) {
+    console.error('Error saving to IndexedDB:', e);
+  }
 }
 
 async function loadState() {
-  const state = await idbKeyval.get(STORAGE_KEY);
-  if (state) {
-    totalBtc = state.totalBtc || 0;
-    totalInvested = state.totalInvested || 0;
-    buyHistory = state.buyHistory || [];
-    priceHistory = state.priceHistory || [];
-    priceData = state.priceData || { labels: [], datasets: [] };
-    currentPrice = state.currentPrice || 0;
-    nextPurchaseTime = state.nextPurchaseTime ? new Date(state.nextPurchaseTime) : null;
-    tradingFees = state.tradingFees || 0.1;
-    
-    // Update UI
-    updateUIFromState();
-    
-    // If simulation was active, restart it
-    if (state.simulationActive) {
-      document.getElementById('start').click();
+  // Try to load from IndexedDB first
+  try {
+    const idbState = await idbKeyval.get(IDB_STORE_NAME);
+    if (idbState) {
+      applyLoadedState(idbState);
+      return;
     }
+  } catch (e) {
+    console.error('Error loading from IndexedDB:', e);
+  }
+  
+  // Fall back to localStorage if IndexedDB fails
+  const savedData = localStorage.getItem(STORAGE_KEY);
+  if (savedData) {
+    applyLoadedState(JSON.parse(savedData));
+  }
+}
+
+function applyLoadedState(state) {
+  totalBtc = state.totalBtc || 0;
+  totalInvested = state.totalInvested || 0;
+  buyHistory = state.buyHistory || [];
+  currentPrice = state.currentPrice || 0;
+  nextPurchaseTime = state.nextPurchaseTime ? new Date(state.nextPurchaseTime) : null;
+  tradingFees = state.tradingFees || 0.1;
+  
+  // Update UI
+  updateUIFromState();
+  
+  // If simulation was active, restart it
+  if (state.simulationActive) {
+    document.getElementById('start').click();
   }
 }
 
@@ -526,14 +522,16 @@ function updateUIFromState() {
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
       </div>
       <div class="log-actions">
-        <button class="btn btn-danger btn-sm delete-entry" data-index="${index}">Delete</button>
+        <button class="delete-btn" data-index="${index}" title="Delete entry">
+          <i class="fas fa-trash-alt"></i>
+        </button>
       </div>
     `;
     logElement.appendChild(logEntry);
   });
   
   // Add event listeners to delete buttons
-  document.querySelectorAll('.delete-entry').forEach(button => {
+  document.querySelectorAll('.delete-btn').forEach(button => {
     button.addEventListener('click', function() {
       deleteEntry(parseInt(this.getAttribute('data-index')));
     });
@@ -635,23 +633,6 @@ async function updatePrice() {
       }
       document.getElementById('alerts').innerHTML = alertHtml;
     }
-
-    // Update chart data
-    const nowStr = now.toISOString();
-    if (!priceData.labels.includes(nowStr)) {
-      priceData.labels.push(nowStr);
-      priceData.datasets[0].data.push({x: nowStr, y: price});
-      
-      // Keep only the last 1000 data points to prevent performance issues
-      if (priceData.labels.length > 1000) {
-        priceData.labels.shift();
-        priceData.datasets[0].data.shift();
-      }
-      
-      if (chart) {
-        chart.update();
-      }
-    }
     
     updateStatus();
     await saveState();
@@ -660,82 +641,7 @@ async function updatePrice() {
 
 const priceUpdateInterval = setInterval(updatePrice, 60000);
 
-async function fetchHistoricalData() {
-  try {
-    const response = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30');
-    const data = await response.json();
-    const prices = data.prices;
-    prices.forEach(([timestamp, price]) => {
-      const date = new Date(timestamp).toISOString();
-      priceData.labels.push(date);
-      priceData.datasets[0].data.push({x: date, y: price});
-    });
-  } catch (e) {
-    console.error('Failed to fetch historical data:', e);
-  }
-}
-
-function initChart() {
-  const ctx = document.getElementById('priceChart').getContext('2d');
-  chart = new Chart(ctx, {
-    type: 'line',
-    data: priceData,
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { 
-          type: 'time',
-          time: {
-            unit: 'day',
-            tooltipFormat: 'MMM d, yyyy h:mm a'
-          },
-          title: {
-            display: true,
-            text: 'Date'
-          }
-        },
-        y: {
-          title: {
-            display: true,
-            text: 'Price (USD)'
-          }
-        }
-      },
-      interaction: {
-        intersect: false,
-        mode: 'index'
-      },
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              let label = context.dataset.label || '';
-              if (label) {
-                label += ': ';
-              }
-              if (context.parsed.y !== null) {
-                label += '$' + context.parsed.y.toFixed(2);
-              }
-              return label;
-            }
-          }
-        },
-        legend: {
-          position: 'top',
-          labels: {
-            boxWidth: 12,
-            padding: 20
-          }
-        }
-      }
-    }
-  });
-}
-
-let intervalId;
 function startSimulation() {
-  if (intervalId) clearInterval(intervalId);
   if (countdownInterval) clearInterval(countdownInterval);
   
   const amount = parseFloat(document.getElementById('amount').value);
@@ -791,9 +697,6 @@ async function executePurchase(amount) {
     document.getElementById('totalInvested').textContent = `$${totalInvested.toFixed(2)}`;
     document.getElementById('avgPrice').textContent = `$${avgPrice.toFixed(2)}`;
     
-    const nowStr = new Date().toISOString();
-    priceData.datasets[1].data.push({x: nowStr, y: price});
-    
     // Calculate profit/loss for this purchase
     const pl = calculateProfitLoss(price, currentPrice, amount, fees);
     
@@ -809,29 +712,24 @@ async function executePurchase(amount) {
         ${pl.isProfit ? '+' : ''}$${pl.value.toFixed(2)} (${pl.isProfit ? '+' : ''}${pl.percentage.toFixed(2)}%)
       </div>
       <div class="log-actions">
-        <button class="btn btn-danger btn-sm delete-entry" data-index="${buyHistory.length - 1}">Delete</button>
+        <button class="delete-btn" data-index="${buyHistory.length - 1}" title="Delete entry">
+          <i class="fas fa-trash-alt"></i>
+        </button>
       </div>
     `;
     document.getElementById('log').insertBefore(logEntry, document.getElementById('log').firstChild);
     
     // Add event listener to delete button
-    logEntry.querySelector('.delete-entry').addEventListener('click', function() {
+    logEntry.querySelector('.delete-btn').addEventListener('click', function() {
       deleteEntry(parseInt(this.getAttribute('data-index')));
     });
     
-    if (chart) {
-      chart.update();
-    }
     updateStatus();
     await saveState();
   }
 }
 
 function stopSimulation() {
-  if (intervalId) {
-    clearInterval(intervalId);
-    intervalId = null;
-  }
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
@@ -853,18 +751,8 @@ async function deleteEntry(index) {
     // Remove from buy history
     buyHistory.splice(index, 1);
     
-    // Rebuild price chart buy markers
-    priceData.datasets[1].data = buyHistory.map(buy => ({
-      x: new Date(buy.timestamp).toISOString(),
-      y: buy.price
-    }));
-    
     // Update UI
     updateUIFromState();
-    
-    if (chart) {
-      chart.update();
-    }
     
     await saveState();
   }
@@ -876,13 +764,7 @@ async function resetData() {
     totalInvested = 0;
     buyHistory = [];
     priceHistory = [];
-    priceData = {
-      labels: [],
-      datasets: [
-        { ...priceData.datasets[0], data: [] },
-        { ...priceData.datasets[1], data: [] }
-      ]
-    };
+    currentPrice = 0;
     
     document.getElementById('totalBtc').textContent = '0';
     document.getElementById('totalInvested').textContent = '$0';
@@ -893,11 +775,13 @@ async function resetData() {
     document.getElementById('alerts').innerHTML = '';
     document.getElementById('countdown').textContent = 'Next purchase in: --:--:--';
     
-    if (chart) {
-      chart.update();
+    // Clear both storage mechanisms
+    localStorage.removeItem(STORAGE_KEY);
+    try {
+      await idbKeyval.del(IDB_STORE_NAME);
+    } catch (e) {
+      console.error('Error clearing IndexedDB:', e);
     }
-    
-    await idbKeyval.del(STORAGE_KEY);
     
     stopSimulation();
   }
@@ -913,15 +797,12 @@ document.getElementById('tradingFees').addEventListener('change', function() {
 });
 
 // Initialize the application
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
   // Load saved state
-  await loadState();
+  loadState();
   
-  // Initialize chart and data
-  fetchHistoricalData().then(() => {
-    initChart();
-    updatePrice(); // Get initial price
-  });
+  // Get initial price
+  updatePrice();
 });
 
 // Periodic state save
